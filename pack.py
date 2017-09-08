@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 #coding=utf-8
 # Version: v1.0
-# Date: 2017/09/04
+# Date: 2017/09/07
 # Author: chenxs
 
 # 参数：
@@ -17,6 +17,25 @@ import commands
 import shutil
 import os
 import glob
+
+PATH_ROM = '../ROM/'
+PATH_OUT_PRODUCT = "out/target/product/"
+
+mTargetFolerName = 'pack_tmp'
+mTargetFolderPath = ''
+mCopyVerified = False
+mCopyOTA = False
+mArgOTA = ''
+
+mOutRootPath = ''
+mAPFilePath = ''
+mAPFileName = ''
+mBPFilesPath = ''
+mBPFilesName = []
+mFirmwareFilesList = []
+mVerifiedFilesList = []
+mOtaFile = ''
+mOtaPath = ''
 ################################
 # print color function
 ################################
@@ -32,8 +51,9 @@ def greenAndYellow(sText1, sText2):
 ################################
 # set default encoding to 'utf8'
 ################################
-reload(sys)
-sys.setdefaultencoding('utf8')
+def setEncodingToUTF8():
+    reload(sys)
+    sys.setdefaultencoding('utf8')
 
 ################################
 # get args
@@ -43,17 +63,20 @@ def getArgValue(argStr):
         return argStr.split('=')[1].rstrip()
     return ''
 
-mDirName = ''
-mVerifiedFlag = False
-mOtaArg = ''
-if len(sys.argv) > 0:
-    for argStr in sys.argv:
-        if '--name' in argStr:
-            mDirName = getArgValue(argStr)
-        elif '-v' in argStr:
-            mVerifiedFlag = True
-        elif '--ota' in argStr:
-            mOtaArg = getArgValue(argStr)
+def getAllArgs():
+    global mTargetFolerName
+    global mCopyVerified
+    global mCopyOTA
+    global mArgOTA
+    if len(sys.argv) > 0:
+        for argStr in sys.argv:
+            if '--name' in argStr:
+                mTargetFolerName = getArgValue(argStr)
+            elif '-v' in argStr:
+                mCopyVerified = True
+            elif '--ota' in argStr:
+                mArgOTA = getArgValue(argStr)
+                mCopyOTA = True
 
 ################################
 # get command output
@@ -63,43 +86,36 @@ def getCommandOutput(sCommand):
     return output
 
 ################################
-# check target folder
+# check is wifi platform
 ################################
-path_ROM = '../ROM/'
-
-if mDirName != '':
-    path_packDir = '../ROM/' + mDirName + '/'
-else:
-    path_packDir = '../ROM/pack_tmp/'
-
-if not os.path.exists(path_ROM):
-    os.makedirs(path_ROM)
-if os.path.exists(path_packDir):
-    shutil.rmtree(path_packDir)
-os.makedirs(path_packDir)
+def isWifiPlatform():
+    codePath = getCommandOutput('pwd')
+    if ("8127" in codePath) or ("8163" in codePath) or ("8167" in codePath):
+        return True
+    else:
+        return False
 
 ################################
-# check out path exist
+# check ROM path
 ################################
-def checkPathExists(filePath, exitFlag):
-    if not os.path.exists(filePath):
-        if exitFlag:
-            print("File is not exist:\n" + filePath)
-            sys.exit(0)
-        else:
-            return False
-    return True
+def checkRomPath():
+    if not os.path.exists(PATH_ROM):
+        os.makedirs(PATH_ROM)
 
-path_out_product = "out/target/product/"
-
-checkPathExists(path_out_product, True)
+################################
+# check target folder path
+################################
+def checkTargetFolderPath(targetFolderPath):
+    if os.path.exists(targetFolderPath):
+        shutil.rmtree(targetFolderPath)
+    os.makedirs(targetFolderPath)
 
 ################################
 # get product path
 ################################
 def getSelectValue(showStr, valueDict, valueList):
     while 1:
-        valueInput = raw_input("Select a project:\n" + showStr)
+        valueInput = raw_input("Select:\n" + showStr)
         valueDict = valueDict.get(str(valueInput), "")
         if valueDict != "":
             valueSelet = valueDict
@@ -119,29 +135,27 @@ def getAndSelectMultiFolder(folderlist):
         folderNameStr = folderNameStr + str(i) + ". " + folderName + "\n"
     return getSelectValue(folderNameStr, folderNameDict, folderlist)
 
-mProductsList = os.listdir(path_out_product)
-for path in mProductsList:
-    if not os.path.isdir(path):
-        mProductsList.remove(path)
+def getOutRootPath():
+    global mOutRootPath
+    foldersList = os.listdir(PATH_OUT_PRODUCT)
 
-if len(mProductsList) > 1:
-    mProduct = getAndSelectMultiFolder(mProductsList)
-elif len(mProductsList) == 1 :
-    mProduct = mProductsList[0]
-else:
-    print("out/target/product/为空目录")
-    sys.exit(0)
+    for path in foldersList:
+        if not os.path.isdir(PATH_OUT_PRODUCT + path):
+            foldersList.remove(path)
 
-path_out_root = "out/target/product/" + mProduct + "/"
+    if len(foldersList) > 1:
+        mProduct = getAndSelectMultiFolder(foldersList)
+    elif len(foldersList) == 1 :
+        mProduct = foldersList[0]
+    else:
+        print("out/target/product/为空目录")
+        sys.exit(0)
+    
+    mOutRootPath = "out/target/product/" + mProduct + "/"
 
 ################################
-# check DB files path
+# get DB files path
 ################################
-path_AP_list = [path_out_root + 'obj/CGEN/', path_out_root + 'obj/CODEGEN/cgen/']
-path_BP_list = [path_out_root + 'system/etc/mddb/', path_out_root + 'system/vendor/etc/mddb/']
-APFile = ''
-BPFile = ''
-
 def findDirInList(dirList):
     for d in dirList:
         if os.path.exists(d):
@@ -164,38 +178,68 @@ def findFileInDir(dirPath, sKey, multiFiles):
                         return file
     return ''
 
-path_AP_root = findDirInList(path_AP_list)
-APFile = findFileInDir(path_AP_root, '_ENUM', False).rstrip('_ENUM')
-if APFile == '':
-    print('未找到AP文件')
+def getAPFile():
+    global mAPFilePath
+    global mAPFileName
+    AP_PathList = [mOutRootPath + 'obj/CGEN/', mOutRootPath + 'obj/CODEGEN/cgen/']
+    mAPFilePath = findDirInList(AP_PathList)
+    if mAPFilePath != '':
+        mAPFileName = findFileInDir(mAPFilePath, '_ENUM', False).rstrip('_ENUM')
+        if mAPFileName != '':
+            return
+    print(red('未找到AP文件'))
 
-path_BP_root = findDirInList(path_BP_list)
-BPFiles = findFileInDir(path_BP_root, 'BPLGU', True)
+def getBPFiles():
+    global mBPFilesPath
+    global mBPFilesName
+    BP_PathList = [mOutRootPath + 'system/etc/mddb/', mOutRootPath + 'system/vendor/etc/mddb/']
+    mBPFilesPath = findDirInList(BP_PathList)
+    if mBPFilesPath != '':
+        mBPFilesName = findFileInDir(mBPFilesPath, 'BPLGU', True)
+        if len(mBPFilesName) > 0:
+            return
+    print(red('未找到BP文件'))
 
 ##################################################
 # get file names for copy in *_Android_scatter.txt
 ##################################################
-path_scatter = glob.glob(r"out/target/product/" + mProduct + "/*_Android_scatter.txt")[0]
+def getScatterFile():
+    return glob.glob(r'' + mOutRootPath + "/*_Android_scatter.txt")
 
-packFilesList = [path_scatter.lstrip(path_out_root)]
-fp = open(path_scatter,'r')
-for line in fp.readlines():
-    if 'file_name' in line:
-        if not 'NONE' in line:
-            fileName = line.split(':')[1].strip()
-            if not fileName in packFilesList:
-                packFilesList.append(fileName)
-if not len(packFilesList) > 0:
-    print('未找到文件')
-    sys.exit(0)
-fp.close()
+def getOtherFirmwareFiles(scatterFileList):
+    global mFirmwareFilesList
+    if len(scatterFileList) > 1:
+        scatterFilePath = getAndSelectMultiFolder(scatterFileList)
+    else:
+        scatterFilePath = scatterFileList[0]
+
+    scatterFileName = scatterFilePath.lstrip(mOutRootPath)
+    mFirmwareFilesList = [scatterFileName]
+
+    fp = open(scatterFilePath,'r')
+    for line in fp.readlines():
+        if 'file_name' in line:
+            if not 'NONE' in line:
+                fileName = line.split(':')[1].strip()
+                if not fileName in mFirmwareFilesList:
+                    mFirmwareFilesList.append(fileName)
+    fp.close()
+    
+    
+def getFirmwareFiles():
+    scatterFileList = getScatterFile()
+    if len(scatterFileList) > 0:
+        getOtherFirmwareFiles(scatterFileList)
+    else:
+        print('未找到文件')
+        sys.exit(0)
 
 ################################
 # get verified files
 ################################
-if mVerifiedFlag:
-    mVerifiedFilesList = []
-    outFilesList = os.listdir(path_out_root)
+def getVerifiedFiles():
+    global mVerifiedFilesList
+    outFilesList = os.listdir(mOutRootPath)
     for fileName in outFilesList:
         if '-verified' in fileName:
             mVerifiedFilesList.append(fileName)
@@ -203,69 +247,132 @@ if mVerifiedFlag:
 ################################
 # get OTA file
 ################################
-if mOtaArg != '':
-    mOtaFile = ''
-    mOtaPath = ''
-
-    if mOtaArg == 'tf':
+def getOtaFile():
+    global mCopyOTA
+    global mOtaFile
+    global mOtaPath
+    if mArgOTA == 'tf':
         mOtaPath = 'obj/PACKAGING/target_files_intermediates/'
-        tfFilesList = os.listdir(path_out_root + mOtaPath)
+        tfFilesList = os.listdir(mOutRootPath + mOtaPath)
         filesList = []
         for fileName in tfFilesList:
             if ('-target_files-' in fileName) and (fileName.endswith('.zip')):
                 filesList.append(fileName)
-        filesList.sort()
-        mOtaFile = filesList[len(filesList) - 1]
+        if len(filesList) > 0:
+            if len(filesList) > 1:
+                filesList.sort()
+            mOtaFile = filesList[len(filesList) - 1]
+        else:
+            mCopyOTA = False
 
-    elif mOtaArg == 'tfp':
+    elif mArgOTA == 'tfp':
         mOtaFile = 'target_files-package.zip'
+        if not os.path.exists(mOutRootPath + mOtaFile):
+            mCopyOTA = False
 
-    elif mOtaArg == 'ota':
-        outFilesList = os.listdir(path_out_root)
+    elif mArgOTA == 'ota':
+        outFilesList = os.listdir(mOutRootPath)
         for fileName in outFilesList:
             if ('-ota-' in fileName) and (fileName.endswith('.zip')):
                 mOtaFile = fileName
+        if mOtaFile == '':
+            mCopyOTA = False
+    else:
+        mCopyOTA = False
 
 ################################
 # get and copy DB files
 ################################
-if APFile != '' or len(BPFiles) > 0:
-    path_DB = path_packDir + 'DB/'
-    os.makedirs(path_DB)
-    print(red('########## DB files ##########'))
-    if APFile != '':
-        shutil.copyfile(path_AP_root + APFile, path_DB + APFile)
-        print(greenAndYellow('copy ', path_DB + APFile))
-    if len(BPFiles) > 0:
-        for BPFile in BPFiles:
-            shutil.copyfile(path_BP_root + BPFile, path_DB + BPFile)
-            print(greenAndYellow('copy ', path_DB + BPFile))
+def copyAPFile(targetPath_DB):
+        shutil.copyfile(mAPFilePath + mAPFileName, targetPath_DB + mAPFileName)
+        print(greenAndYellow('copy ', targetPath_DB + mAPFileName))
+    
+def copyBPFile(targetPath_DB):
+    for BPFile in mBPFilesName:
+        shutil.copyfile(mBPFilesPath + BPFile, targetPath_DB + BPFile)
+        print(greenAndYellow('copy ', targetPath_DB + BPFile))
+
+def copyDBFile():
+    targetPath_DB = mTargetFolderPath + 'DB/'
+    os.makedirs(targetPath_DB)
+
+    if mAPFileName != '':
+        copyAPFile(targetPath_DB)
+
+    if len(mBPFilesName) > 0:
+        copyBPFile(targetPath_DB)
 
 ################################
 # copy firmware files
 ################################
-print(red('########## Firmware files ##########'))
-for packFile in packFilesList:
-    shutil.copyfile(path_out_root + packFile, path_packDir + packFile)
-    print(greenAndYellow('copy ', path_packDir + packFile))
+def copyFirmwareFiles():
+    for packFile in mFirmwareFilesList:
+        shutil.copyfile(mOutRootPath + packFile, mTargetFolderPath + packFile)
+        print(greenAndYellow('copy ', mTargetFolderPath + packFile))
 
 ################################
 # copy verified files
 ################################
-if mVerifiedFlag:
-    print(red('########## Verified files ##########'))
+def copyVerifiedFiles():
     for verifiedFile in mVerifiedFilesList:
-        shutil.copyfile(path_out_root + verifiedFile, path_packDir + verifiedFile)
-        print(greenAndYellow('copy ', path_packDir + verifiedFile))
+        shutil.copyfile(mOutRootPath + verifiedFile, mTargetFolderPath + verifiedFile)
+        print(greenAndYellow('copy ', mTargetFolderPath + verifiedFile))
 
 ################################
 # copy ota file
 ################################
-if mOtaFile != '':
-    path_OTA = path_packDir + 'OTA/'
+def copyOtaFile():
+    path_OTA = mTargetFolderPath + 'OTA/'
     os.makedirs(path_OTA)
-    print(red('########## OTA file ##########'))
-    shutil.copyfile(path_out_root + mOtaPath + mOtaFile, path_OTA + mOtaFile)
+    shutil.copyfile(mOutRootPath + mOtaPath + mOtaFile, path_OTA + mOtaFile)
     print(greenAndYellow('copy ', path_OTA + mOtaFile))
 
-print(red('########## End ##########'))
+def main():
+    setEncodingToUTF8()
+    getAllArgs()
+
+    # check target path
+    global mTargetFolderPath
+    mTargetFolderPath = PATH_ROM + mTargetFolerName + '/'
+    checkRomPath()
+    checkTargetFolderPath(mTargetFolderPath)
+
+    if not os.path.exists(PATH_OUT_PRODUCT):
+        print('路径不存在: ' + PATH_OUT_PRODUCT)
+        sys.exit(0)
+
+    # get files
+    getOutRootPath()
+
+    getAPFile()
+
+    if not isWifiPlatform():
+        getBPFiles()
+
+    getFirmwareFiles()
+
+    if mCopyVerified:
+        getVerifiedFiles()
+
+    if mCopyOTA:
+        getOtaFile()
+
+    # start copy
+    print(red('########## DB files ##########'))
+    copyDBFile()
+
+    print(red('########## Firmware files ##########'))
+    copyFirmwareFiles()
+
+    if mCopyVerified:
+        print(red('########## Verified files ##########'))
+        copyVerifiedFiles()
+
+    if mCopyOTA:
+        print(red('########## OTA file ##########'))
+        copyOtaFile()
+
+    print(red('########## End ##########'))
+
+if __name__ == "__main__":
+    main()
