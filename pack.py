@@ -6,7 +6,7 @@
 
 # 参数：
 # --name=xxx   指定新文件夹名称
-# -v         拷贝verified文件
+# --vrf         拷贝verified文件
 # --ota=
 #       tf -> /obj/PACKAGING/target_files_intermediates/[product]-target_files-[time]
 #       tfp -> /target_files-package.zip
@@ -72,7 +72,7 @@ def getAllArgs():
         for argStr in sys.argv:
             if '--name' in argStr:
                 mTargetFolerName = getArgValue(argStr)
-            elif '-v' in argStr:
+            elif '--vrf' in argStr:
                 mCopyVerified = True
             elif '--ota' in argStr:
                 mArgOTA = getArgValue(argStr)
