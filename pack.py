@@ -216,15 +216,28 @@ def getOtherFirmwareFiles(scatterFileList):
     scatterFileName = scatterFilePath.lstrip(mOutRootPath)
     mFirmwareFilesList = [scatterFileName]
 
-    fp = open(scatterFilePath,'r')
-    for line in fp.readlines():
-        if 'file_name' in line:
-            if not 'NONE' in line:
-                fileName = line.split(':')[1].strip()
-                if not fileName in mFirmwareFilesList:
-                    mFirmwareFilesList.append(fileName)
-    fp.close()
-    
+    findFlag = False
+    replaceFlag = False
+    with open(scatterFilePath,'r') as fp:
+        lines = fp.readlines()
+        for i, line in enumerate(lines):
+            if findFlag:
+                if ('is_download' in line) and ('true' in line):
+                    lines[i] = line.replace("true", 'false')
+                    replaceFlag = True
+                    findFlag = False
+
+            elif 'file_name' in line:
+                if not 'NONE' in line:
+                    fileName = line.split(':')[1].strip()
+                    if not fileName in mFirmwareFilesList:
+                        mFirmwareFilesList.append(fileName)
+
+                    if not replaceFlag:
+                        if 'preloader' in fileName:
+                            findFlag = True
+    with open(scatterFilePath, 'w') as fp:
+        fp.write(''.join(lines))
     
 def getFirmwareFiles():
     scatterFileList = getScatterFile()
